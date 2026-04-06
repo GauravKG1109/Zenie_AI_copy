@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Zenie AI Tester</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+
+  <h2>Zenie AI Chat Tester</h2>
+
+  <!-- Top Controls -->
+  <div class="top-bar">
+    <input id="companyId" placeholder="Company ID" value="1" />
+    <input id="sessionId" placeholder="Session ID" readonly />
+    <button onclick="generateSession()">🔄 Reset</button>
+  </div>
+
+  <!-- Chat Window -->
+  <div id="chatWindow" class="chat-window"></div>
+
+  <!-- Input -->
+  <div class="input-area">
+    <input id="messageInput" placeholder="Type message..." onkeydown="if(event.key==='Enter') sendMessage()" />
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <!-- Info panels: Intent + Date side by side -->
+  <div class="info-row">
+
+    <!-- Intent Panel -->
+    <div class="info-panel intent-panel">
+      <h3>Intent</h3>
+      <div class="info-body" id="intentOutput">
+        <span class="placeholder">— will populate after a message —</span>
+      </div>
+    </div>
+
+    <!-- Date Panel -->
+    <div class="info-panel date-panel">
+      <h3>Extracted Date</h3>
+      <div class="info-body" id="dateOutput">
+        <span class="placeholder">— will populate after a message —</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SQL Panel -->
+  <div class="sql-panel">
+    <div class="sql-panel-header">
+      <h3>Generated SQL</h3>
+      <button class="copy-btn" onclick="copySQL()">Copy</button>
+    </div>
+    <pre id="sqlOutput">— SQL will appear here after you send a message —</pre>
+  </div>
+
+  <!-- Logs -->
+  <div class="logs">
+    <h3>Logs</h3>
+    <div id="logWindow"></div>
+  </div>
+
+</div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

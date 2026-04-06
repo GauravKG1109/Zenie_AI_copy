@@ -1,0 +1,9 @@
+#add venv, .env pycache and other folders
+# Virtual environment
+venv/
+# Environment variables file
+.env
+# Python bytecode
+__pycache__/
+
+#other important files

@@ -1,0 +1,190 @@
+body {
+  font-family: Arial;
+  background: #0f172a;
+  color: white;
+}
+
+.container {
+  width: 800px;
+  margin: auto;
+}
+
+.top-bar input {
+  margin: 5px;
+  padding: 8px;
+}
+
+.chat-window {
+  height: 300px;
+  overflow-y: auto;
+  border: 1px solid #444;
+  padding: 10px;
+  margin: 10px 0;
+  background: #020617;
+}
+
+.message {
+  margin: 5px 0;
+}
+
+.user {
+  color: #38bdf8;
+}
+
+.bot {
+  color: #22c55e;
+}
+
+.input-area {
+  display: flex;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 10px;
+}
+
+/* ── Intent + Date side-by-side row ─────────────────────────── */
+.info-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.info-panel {
+  flex: 1;
+  background: #0d1117;
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.intent-panel {
+  border: 1px solid #7c3aed66;
+}
+
+.date-panel {
+  border: 1px solid #10b98166;
+}
+
+.info-panel h3 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.intent-panel h3 { color: #a78bfa; }
+.date-panel h3   { color: #34d399; }
+
+.info-body {
+  font-size: 13px;
+}
+
+.info-row-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 5px;
+  align-items: flex-start;
+}
+
+.info-label {
+  color: #94a3b8;
+  min-width: 60px;
+  font-size: 11px;
+  padding-top: 2px;
+}
+
+.info-value {
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.code-tag {
+  font-family: monospace;
+  font-size: 12px;
+  background: #1e293b;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.info-desc {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  border-top: 1px solid #1e293b;
+  padding-top: 6px;
+  line-height: 1.5;
+}
+
+.compare-divider {
+  text-align: center;
+  color: #f59e0b;
+  font-weight: bold;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.placeholder {
+  color: #475569;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ── SQL panel ───────────────────────────────────────────────── */
+.sql-panel {
+  margin-top: 20px;
+  background: #0d1117;
+  border: 1px solid #00d4ff44;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+.sql-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sql-panel-header h3 {
+  margin: 0;
+  color: #00d4ff;
+}
+
+.sql-panel pre {
+  font-family: monospace;
+  font-size: 13px;
+  color: #00d4ff;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.copy-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #00d4ff22;
+  border: 1px solid #00d4ff66;
+  color: #00d4ff;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.copy-btn:hover {
+  background: #00d4ff44;
+}
+
+.logs {
+  margin-top: 20px;
+  background: black;
+  padding: 10px;
+  height: 200px;
+  overflow-y: auto;
+}
+
+button {
+  padding: 8px 12px;
+  cursor: pointer;
+}
