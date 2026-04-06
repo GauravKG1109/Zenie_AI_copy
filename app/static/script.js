@@ -89,6 +89,29 @@ function renderDate(dateRange) {
   document.getElementById("dateOutput").innerHTML = html;
 }
 
+// Handle one SSE chunk from the pipeline stream
+function handleStreamChunk(chunk) {
+  if (chunk.node === "__done__") return;
+
+  // Log lines arrive as soon as the node completes
+  if (chunk.logs && chunk.logs.length > 0) {
+    chunk.logs.forEach(line => log(line));
+  }
+
+  // Intent panel — populated when intent_classifier node finishes
+  if (chunk.intent) renderIntent(chunk.intent);
+
+  // Date panel — populated when date_extractor node finishes
+  if (chunk.date_range) renderDate(chunk.date_range);
+
+  // SQL panel + bot message — populated when sql_generator node finishes
+  if (chunk.sql_query) {
+    document.getElementById("sqlOutput").innerText = chunk.sql_query;
+    addMessage("bot", chunk.sql_query);
+    history.push({ role: "assistant", content: chunk.sql_query });
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById("messageInput");
   const message = input.value.trim();
@@ -99,38 +122,47 @@ async function sendMessage() {
 
   addMessage("user", message);
   history.push({ role: "user", content: message });
-
-  const trimmedHistory = history.slice(-8);
+  input.value = "";
 
   log("📤 Sending request...");
 
-  const response = await fetch("/api/v1/chat/", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      company_id: companyId,
-      session_id: sessionId,
-      message: message,
-      history: trimmedHistory,
-      metadata: { company_id: companyId, session_id: sessionId }
-    })
-  });
+  try {
+    const response = await fetch("/api/v1/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company_id: companyId,
+        session_id: sessionId,
+        message: message,
+        history: history.slice(-8),
+        metadata: { company_id: companyId, session_id: sessionId }
+      })
+    });
 
-  const data = await response.json();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  const sqlResult = data.data?.sql_query || "";
-  addMessage("bot", sqlResult || data.response);
-  history.push({ role: "assistant", content: data.response });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-  // Populate panels
-  document.getElementById("sqlOutput").innerText = sqlResult || "No SQL generated.";
-  renderIntent(data.data?.intent);
-  renderDate(data.data?.date_range);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep incomplete last line
 
-  // Pipeline logs
-  const pipelineLogs = data.data?.logs || [];
-  pipelineLogs.forEach(line => log(line));
-  log("📥 Response received");
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+        try {
+          handleStreamChunk(JSON.parse(jsonStr));
+        } catch (_) { /* malformed chunk — skip */ }
+      }
+    }
 
-  input.value = "";
+    log("📥 Done");
+  } catch (err) {
+    log(`❌ Error: ${err.message}`);
+  }
 }
