@@ -160,6 +160,11 @@ Always include ALL of these (qualify with alias when JOINing):
    If one view is sufficient, do not force a JOIN.
 7. If a user filter (e.g. "overdue", "not due") has no exact column,
    use the closest date column and add a SQL comment explaining the mapping.
+8. To filter on a window function result (e.g. ROW_NUMBER, RANK), wrap the
+   windowed SELECT in a CTE and filter in the outer query.
+   Never use QUALIFY — it is not supported in PostgreSQL.
+9. Only filter on date columns that are directly relevant to the user's question.
+   Do not add date filters on columns the user did not mention.
 
 {input}""",
 )
