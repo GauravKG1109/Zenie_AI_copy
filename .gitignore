@@ -6,4 +6,6 @@ venv/
 # Python bytecode
 __pycache__/
 
-#other important files
+#locally downloaded SLM models via ollama and their cache
+
+ollama_models/

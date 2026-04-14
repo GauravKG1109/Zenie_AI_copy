@@ -75,12 +75,22 @@ def _load_and_clean_excel() -> pd.DataFrame:
     if "SQL_Query" not in df.columns:
         df["SQL_Query"] = None
 
-    # Only embed rows with a non-empty View column
-    if "View" in df.columns:
-        df = df[df["View"].notna() & (df["View"].astype(str).str.strip() != "")].copy()
-        df = df.reset_index(drop=True)
-    else:
+    # Embedding filter:
+    #   READ intents  → require a non-empty View column (no view = no SQL = useless)
+    #   WRITE intents → embed regardless of View (they drive payload filler, not SQL)
+    if "View" not in df.columns:
         df["View"] = None
+
+    action_col = "Action_Type (READ/WRITE)"
+    if action_col in df.columns:
+        is_write = df[action_col].astype(str).str.strip().str.upper() == "WRITE"
+        has_view  = df["View"].notna() & (df["View"].astype(str).str.strip() != "")
+        df = df[is_write | has_view].copy()
+    else:
+        # Fallback: old behaviour — keep only rows with a View
+        df = df[df["View"].notna() & (df["View"].astype(str).str.strip() != "")].copy()
+
+    df = df.reset_index(drop=True)
 
     return df
 
