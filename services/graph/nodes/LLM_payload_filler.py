@@ -33,11 +33,25 @@ logger = logging.getLogger(__name__)
 # ── LLM selection — change this to switch models ──────────────────────────────
 ACTIVE_MODEL = "claude"   # options: "claude" | "gpt" | "qwen"
 
-# ── Session-scoped FieldStorage ────────────────────────────────────────────────
-# Key: (session_id, intent_code) → FieldStorage instance
-# Survives across HTTP requests within the same server process.
-# Lost on server restart — acceptable for local dev; swap for Redis in production.
+# ── Session-scoped state ──────────────────────────────────────────────────────
+# _session_store   : (session_id, intent_code) → FieldStorage
+#                    Holds the accumulated field values for an in-progress WRITE.
+# _active_write_sessions : session_id → intent dict
+#                    Tells the graph router that this session is mid-WRITE so it
+#                    should skip intent_classifier and go straight to payload_filler.
+#
+# Both dicts are in-process (lost on server restart). Swap for Redis in production.
 _session_store: dict = {}
+_active_write_sessions: dict = {}  # session_id → intent dict
+
+
+def get_active_write_intent(session_id: str) -> Optional[dict]:
+    """
+    Returns the stored intent dict if session_id has an in-progress WRITE
+    conversation, or None if it doesn't.
+    Called by the graph router (graph.py) before intent classification.
+    """
+    return _active_write_sessions.get(session_id)
 
 
 # ── Qwen 2.5 7B via Ollama ────────────────────────────────────────────────────
@@ -271,17 +285,23 @@ def payload_filler_node(state: GraphState) -> dict:
     Collects form fields across multiple conversation turns using session-scoped
     FieldStorage (_session_store keyed by (session_id, intent_code)).
     """
-    # BUG FIX: removed extra params (session_id, company_id, message, intent) —
-    # LangGraph only passes `state`; extra params cause a TypeError at graph compile time.
     message    = state.get("message", "")
     session_id = state.get("session_id", "default")
 
-    # BUG FIX: intent is a dict, not a string
-    intent      = state.get("intent", {})
+    # If intent_classifier was bypassed (resume turn), restore intent from the
+    # active-session store so we know which intent we are continuing.
+    intent = state.get("intent") or {}
+    if not intent or not intent.get("intent_code"):
+        intent = _active_write_sessions.get(session_id, {})
+
     intent_name = intent.get("intent_name", "unknown")
     intent_code = intent.get("intent_code", "unknown")
 
-    # BUG FIX: correct state key is "history", not "chathistory"
+    # Register this session as an active WRITE conversation (idempotent).
+    # This is what the graph router checks on the NEXT user turn to bypass
+    # intent_classifier and come straight here.
+    _active_write_sessions[session_id] = intent
+
     chat_history = state.get("history", [])
 
     # ── Session-scoped FieldStorage ───────────────────────────────────────────
@@ -326,10 +346,11 @@ def payload_filler_node(state: GraphState) -> dict:
         _, msg = storage.update_field(field, value)
         new_logs.append(f"[PayloadFiller] {msg}: {field} = {value}")
 
-    # Evict session when all fields are complete
+    # Evict session stores when all fields are complete
     if storage.is_complete():
-        logger.info("[PayloadFiller] All fields complete — clearing session store for %s/%s", session_id, intent_code)
+        logger.info("[PayloadFiller] All fields complete — clearing stores for %s/%s", session_id, intent_code)
         del _session_store[store_key]
+        _active_write_sessions.pop(session_id, None)  # deregister; next msg → fresh classification
 
     log_line = (
         f"[PayloadFiller] intent={intent_name} | "
@@ -339,6 +360,7 @@ def payload_filler_node(state: GraphState) -> dict:
     logger.info(log_line)
 
     return {
+        "intent":       intent,          # keep intent visible in state for frontend display
         "current_data": storage.get_data(),
         "reply":        reply,
         "payload_logs": [log_line] + new_logs,

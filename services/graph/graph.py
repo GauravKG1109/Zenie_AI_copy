@@ -6,14 +6,35 @@ from services.graph.nodes.orchestrator import orchestrator_node
 from services.graph.nodes.intent_classifier import intent_classifier_node
 from services.graph.nodes.date_extractor import date_extractor_node
 from services.graph.nodes.sql_generator import sql_generator_node
-from services.graph.nodes.LLM_payload_filler import payload_filler_node
+from services.graph.nodes.LLM_payload_filler import payload_filler_node, get_active_write_intent
 
 logger = logging.getLogger(__name__)
 
 
+def _route_from_orchestrator(state: GraphState) -> str:
+    """
+    First routing decision — runs immediately after orchestrator.
+
+    If the session already has an in-progress WRITE conversation (i.e. the user
+    is answering follow-up questions for field collection), skip intent_classifier
+    entirely and go straight to payload_filler_node.  This prevents follow-up
+    messages like "DRAFT" or "INV-001" from being re-classified as new intents.
+
+    Otherwise run the normal intent_classifier → conditional-branch path.
+    """
+    session_id = state.get("session_id", "")
+    if get_active_write_intent(session_id):
+        logger.info(
+            "[Graph] Active WRITE session for session_id=%s — bypassing intent_classifier",
+            session_id,
+        )
+        return "payload_filler_node"
+    return "intent_classifier"
+
+
 def _route_after_intent(state: GraphState) -> str:
     """
-    Conditional router executed after intent_classifier.
+    Second routing decision — runs after intent_classifier (first message only).
     Routes WRITE intents to payload_filler_node; everything else to date_extractor.
     """
     action_type = state.get("intent", {}).get("action_type", "").strip().upper()
@@ -34,11 +55,19 @@ def build_graph():
     g.add_node("sql_generator",       sql_generator_node)
     g.add_node("payload_filler_node", payload_filler_node)
 
-    # Sequential entry: START → orchestrator → intent_classifier (always)
     g.add_edge(START, "orchestrator")
-    g.add_edge("orchestrator", "intent_classifier")
 
-    # Conditional branch after intent classification
+    # After orchestrator: resume active WRITE session OR run intent_classifier
+    g.add_conditional_edges(
+        "orchestrator",
+        _route_from_orchestrator,
+        {
+            "payload_filler_node": "payload_filler_node",  # resume in-progress WRITE
+            "intent_classifier":   "intent_classifier",    # fresh classification
+        },
+    )
+
+    # After intent_classifier (first message only): branch on action_type
     g.add_conditional_edges(
         "intent_classifier",
         _route_after_intent,

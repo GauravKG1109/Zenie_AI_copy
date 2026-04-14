@@ -104,11 +104,17 @@ function handleStreamChunk(chunk) {
   // Date panel — populated when date_extractor node finishes
   if (chunk.date_range) renderDate(chunk.date_range);
 
-  // SQL panel + bot message — populated when sql_generator node finishes
+  // SQL panel + bot message — populated when sql_generator node finishes (READ path)
   if (chunk.sql_query) {
     document.getElementById("sqlOutput").innerText = chunk.sql_query;
     addMessage("bot", chunk.sql_query);
     history.push({ role: "assistant", content: chunk.sql_query });
+  }
+
+  // Bot reply — populated when payload_filler_node finishes (WRITE path)
+  if (chunk.reply) {
+    addMessage("bot", chunk.reply);
+    history.push({ role: "assistant", content: chunk.reply });
   }
 }
 

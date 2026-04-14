@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python3)",
       "Bash(python3 -m json.tool)",
-      "Bash(curl -s -X POST http://localhost:8001/api/v1/chat/ -H 'Content-Type: application/json' -d '{:*)"
+      "Bash(curl -s -X POST http://localhost:8001/api/v1/chat/ -H 'Content-Type: application/json' -d '{:*)",
+      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l[6:]\\).get\\('node'\\), '|', json.loads\\(l[6:]\\).get\\('reply',''\\)[:80] if json.loads\\(l[6:]\\).get\\('reply'\\) else json.loads\\(l[6:]\\).get\\('logs',[]\\)\\) for l in sys.stdin if l.startswith\\('data:'\\) and l.strip\\(\\) != 'data:']\")",
+      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l[6:]\\).get\\('node'\\), '|', \\(json.loads\\(l[6:]\\).get\\('sql_query',''\\)[:60] or json.loads\\(l[6:]\\).get\\('logs',[]\\)\\)\\) for l in sys.stdin if l.startswith\\('data:'\\) and l.strip\\(\\) != 'data:']\")"
     ]
   }
 }
