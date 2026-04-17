@@ -66,9 +66,8 @@ def _load_and_clean_excel() -> pd.DataFrame:
     _CORE_COLS = [
         "Intent_Code", "Intent_Name", "Intent_Category",
         "Action_Type (READ/WRITE)", "Description",
-        "Required_Parameters", "Optional_Parameters",
         "Security_Scope", "Human_Approval_Required", "Status",
-        "View", "SQL_Query",
+        "View", "SQL_Query", 
     ]
     df = df[[c for c in _CORE_COLS if c in df.columns]].copy()
 
@@ -99,7 +98,8 @@ def _build_embeddings(df: pd.DataFrame) -> np.ndarray:
     texts = (
         df["Intent_Name"].fillna("") + " " +
         df["Intent_Category"].fillna("") + " " +
-        df["Description"].fillna("")
+        df["Description"].fillna("") + " " +
+        df["Typical_User_Query"].fillna("")
     ).tolist()
     return np.vstack([_model.encode(t) for t in texts])
 
