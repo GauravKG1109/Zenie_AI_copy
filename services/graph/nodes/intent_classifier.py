@@ -34,6 +34,40 @@ _MODEL_DIR     = _DATA_DIR / "models" / "all-MiniLM-L6-v2"
 _EMBED_CACHE   = _DATA_DIR / "embeddings_cache.pkl"
 
 
+# ── Keyword pre-filter (Modification 1) ───────────────────────────────────────
+# When enabled, certain words in the user message restrict semantic search to a
+# specific action_type BEFORE cosine similarity runs — preventing false READ
+# matches for clear WRITE queries like "Create an invoice".
+#
+# Set KEYWORD_FILTER_ENABLED = False to bypass this filter entirely.
+# Add more entries to _KEYWORD_RULES to cover additional trigger words.
+#
+# Pattern format: \b<word>\b  →  exact whole-word, case-insensitive match.
+# Example: matches "Create" and "create" but NOT "created" or "creat".
+
+KEYWORD_FILTER_ENABLED = True
+
+_KEYWORD_RULES: list[tuple[re.Pattern, str]] = [
+    # (compiled pattern,  action_type to restrict search to)
+
+    # WRITE triggers — clear mutation keywords
+    (re.compile(r'\bcreate\b', re.IGNORECASE), "WRITE"),
+    (re.compile(r'\badd\b',    re.IGNORECASE), "WRITE"),
+    (re.compile(r'\binsert\b', re.IGNORECASE), "WRITE"),
+    (re.compile(r'\bpost\b',   re.IGNORECASE), "WRITE"),
+
+    # READ triggers — query/retrieval keywords
+    (re.compile(r'\btell\b',   re.IGNORECASE), "READ"),
+    (re.compile(r'\bshow\b',   re.IGNORECASE), "READ"),
+    (re.compile(r'\bfind\b',   re.IGNORECASE), "READ"),
+
+    # ANALYSE triggers — reserved for future analytical intent type
+    (re.compile(r'\bexplain\b', re.IGNORECASE), "ANALYSE"),
+    (re.compile(r'\banalyse\b', re.IGNORECASE), "ANALYSE"),
+    (re.compile(r'\banalyze\b', re.IGNORECASE), "ANALYSE"),  # US spelling
+]
+
+
 # ── Load model — local disk only, no network call after first download ────────
 if _MODEL_DIR.exists():
     logger.info("[IntentClassifier] Loading model from %s", _MODEL_DIR)
@@ -66,13 +100,17 @@ def _load_and_clean_excel() -> pd.DataFrame:
     _CORE_COLS = [
         "Intent_Code", "Intent_Name", "Intent_Category",
         "Action_Type (READ/WRITE)", "Description",
+        "Required_Parameters", "Optional_Parameters",
         "Security_Scope", "Human_Approval_Required", "Status",
-        "View", "SQL_Query", 
+        "Typical_User_Query",   # used in embedding text
+        "View", "SQL_Query",
     ]
     df = df[[c for c in _CORE_COLS if c in df.columns]].copy()
 
     if "SQL_Query" not in df.columns:
         df["SQL_Query"] = None
+    if "Typical_User_Query" not in df.columns:
+        df["Typical_User_Query"] = None
 
     # Embedding filter:
     #   READ intents  → require a non-empty View column (no view = no SQL = useless)
@@ -86,11 +124,9 @@ def _load_and_clean_excel() -> pd.DataFrame:
         has_view  = df["View"].notna() & (df["View"].astype(str).str.strip() != "")
         df = df[is_write | has_view].copy()
     else:
-        # Fallback: old behaviour — keep only rows with a View
         df = df[df["View"].notna() & (df["View"].astype(str).str.strip() != "")].copy()
 
     df = df.reset_index(drop=True)
-
     return df
 
 
@@ -141,6 +177,51 @@ else:
     logger.info("[IntentClassifier] Embeddings built and cached (%d intents).", len(_df))
 
 
+# ── Precompute per-action_type boolean masks (used by keyword pre-filter) ─────
+_action_col = "Action_Type (READ/WRITE)"
+if _action_col in _df.columns:
+    _action_series = _df[_action_col].astype(str).str.strip().str.upper()
+    _write_mask:   np.ndarray = (_action_series == "WRITE").values
+    _read_mask:    np.ndarray = (_action_series == "READ").values
+    _analyse_mask: np.ndarray = (_action_series == "ANALYSE").values  # future type
+else:
+    _write_mask   = np.zeros(len(_df), dtype=bool)
+    _read_mask    = np.zeros(len(_df), dtype=bool)
+    _analyse_mask = np.zeros(len(_df), dtype=bool)
+
+_ACTION_MASKS: dict[str, np.ndarray] = {
+    "WRITE":   _write_mask,
+    "READ":    _read_mask,
+    "ANALYSE": _analyse_mask,   # no rows yet; filter gracefully degrades (see _get_action_filter)
+}
+
+
+# ── Keyword pre-filter helper ─────────────────────────────────────────────────
+
+def _get_action_filter(message: str) -> np.ndarray | None:
+    """
+    Checks the user message against _KEYWORD_RULES.
+    Returns a boolean mask that restricts semantic search to matching action_type
+    rows, or None if no keyword matched (= no restriction, search all rows).
+
+    Only active when KEYWORD_FILTER_ENABLED is True.
+    """
+    if not KEYWORD_FILTER_ENABLED:
+        return None
+
+    for pattern, action_type in _KEYWORD_RULES:
+        if pattern.search(message):
+            mask = _ACTION_MASKS.get(action_type.upper())
+            if mask is not None and mask.any():
+                logger.info(
+                    "[IntentClassifier] Keyword filter triggered by pattern '%s' "
+                    "— restricting search to %s intents (%d rows)",
+                    pattern.pattern, action_type, mask.sum(),
+                )
+                return mask
+    return None
+
+
 # ── Intent lookup ─────────────────────────────────────────────────────────────
 
 def _parse_views(raw: str) -> list[str]:
@@ -148,11 +229,20 @@ def _parse_views(raw: str) -> list[str]:
 
 
 def _find_intent(query: str) -> dict:
-    # Only the user query is encoded at request time — fast single-vector op
-    vec  = _model.encode(query).reshape(1, -1)
-    sims = cosine_similarity(vec, _embedding_matrix)[0]
+    vec = _model.encode(query).reshape(1, -1)
+
+    # Apply keyword pre-filter if triggered
+    action_filter = _get_action_filter(query)
+    if action_filter is not None:
+        filtered_matrix = _embedding_matrix[action_filter]
+        filtered_df     = _df[action_filter].reset_index(drop=True)
+    else:
+        filtered_matrix = _embedding_matrix
+        filtered_df     = _df
+
+    sims = cosine_similarity(vec, filtered_matrix)[0]
     idx  = int(np.argmax(sims))
-    row  = _df.iloc[idx]
+    row  = filtered_df.iloc[idx]
 
     view_raw = str(row["View"]) if pd.notna(row.get("View")) else ""
     views    = _parse_views(view_raw)
@@ -173,7 +263,7 @@ def _find_intent(query: str) -> dict:
         "description":         str(row["Description"]),
         "required_parameters": str(row["Required_Parameters"]) if pd.notna(row.get("Required_Parameters")) else "None",
         "optional_parameters": str(row["Optional_Parameters"]) if pd.notna(row.get("Optional_Parameters")) else "None",
-        "security_scope":      str(row["Security_Scope"])        if pd.notna(row.get("Security_Scope"))        else "N/A",
+        "security_scope":      str(row["Security_Scope"])          if pd.notna(row.get("Security_Scope"))          else "N/A",
         "human_approval":      str(row["Human_Approval_Required"]) if pd.notna(row.get("Human_Approval_Required")) else "No",
         "status":              str(row["Status"]),
         "view":                view_raw,

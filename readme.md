@@ -18,6 +18,8 @@ uvicorn app.main:app --reload --port 8001
 
 App available at: `http://localhost:8001`
 
+> Embeddings are now built during the `Application startup` phase (before the server accepts requests), so the first user message is never delayed by embedding generation.
+
 > Avoid `--reload` if you want to skip reloading on every file save (the embedding matrix build adds ~5s on restart).
 
 ---
@@ -150,14 +152,56 @@ POST /api/v1/chat/
 ### `data/Intent_file.xlsx`
 The single source of truth for all intents. Loaded once at startup; embeddings are cached in `data/embeddings_cache.pkl` (auto-invalidated when the file changes).
 
-Required columns: `Intent_Code`, `Intent_Name`, `Intent_Category`, `Action_Type (READ/WRITE)`, `Description`, `Required_Parameters`, `Optional_Parameters`, `View`
+Required columns: `Intent_Code`, `Intent_Name`, `Intent_Category`, `Action_Type (READ/WRITE)`, `Description`, `Required_Parameters`, `Optional_Parameters`, `Typical_User_Query`, `View`
 
 **Embedding rules:**
 - `READ` intents: embedded only if the `View` column is non-empty (no view = no SQL = not useful)
 - `WRITE` intents: always embedded, regardless of `View` (they are routed to `payload_filler_node`, not SQL generation)
 
+**Embedding text:** `Intent_Name + Intent_Category + Description + Typical_User_Query` — including the example query improves match quality for conversational phrasing.
+
 ### `data/view_metadata.py`
 Maps each database view to its column list and the date column used for filtering. The SQL generator uses only this — no live database introspection.
+
+### Keyword pre-filter (`nodes/intent_classifier.py`)
+
+Before cosine similarity runs, the classifier checks the user message for trigger words using whole-word regex patterns (`\bcreate\b`, not `created` or `creating`). If a trigger word is found, the semantic search is restricted to the matching `action_type` rows only — preventing, for example, a clear WRITE query from accidentally matching a READ intent.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `KEYWORD_FILTER_ENABLED` | `True` | Set to `False` to disable the filter entirely |
+
+**Current trigger rules:**
+
+| Keyword(s) | Restricts search to | Notes |
+|---|---|---|
+| `create`, `add`, `insert`, `post` | `WRITE` intents only | Exact whole-word match — `created` / `creat` do NOT trigger |
+| `tell`, `show`, `find` | `READ` intents only | Exact whole-word match |
+| `explain`, `analyse`, `analyze` | `ANALYSE` intents only | No `ANALYSE` rows in Excel yet — filter gracefully falls back to searching all intents |
+
+**Graceful fallback:** if a keyword maps to an action_type that has zero matching rows in the intent library (e.g. `ANALYSE` before those intents are added), the filter is silently skipped and the full embedding matrix is searched — so the server never returns an empty result.
+
+To add more trigger words, extend `_KEYWORD_RULES` in `intent_classifier.py`:
+```python
+_KEYWORD_RULES: list[tuple[re.Pattern, str]] = [
+    # WRITE triggers
+    (re.compile(r'\bcreate\b', re.IGNORECASE), "WRITE"),
+    (re.compile(r'\badd\b',    re.IGNORECASE), "WRITE"),
+    (re.compile(r'\binsert\b', re.IGNORECASE), "WRITE"),
+    (re.compile(r'\bpost\b',   re.IGNORECASE), "WRITE"),
+    # READ triggers
+    (re.compile(r'\btell\b',   re.IGNORECASE), "READ"),
+    (re.compile(r'\bshow\b',   re.IGNORECASE), "READ"),
+    (re.compile(r'\bfind\b',   re.IGNORECASE), "READ"),
+    # ANALYSE triggers (future)
+    (re.compile(r'\bexplain\b', re.IGNORECASE), "ANALYSE"),
+    (re.compile(r'\banalyse\b', re.IGNORECASE), "ANALYSE"),
+    (re.compile(r'\banalyze\b', re.IGNORECASE), "ANALYSE"),
+    # add more here ...
+]
+```
+
+When a new `action_type` is introduced (e.g. `ANALYSE`), add its rows to `Intent_file.xlsx` with that value in the `Action_Type (READ/WRITE)` column — the mask is built automatically at startup from the live data, so no code change is needed beyond the Excel update.
 
 ### `core/config.py`
 Holds `DUMMY_FIELDS` and `DUMMY_APIS` — the field definitions for the `CREATE_INVOICE` WRITE intent. These are currently hardcoded as a placeholder; in production they will be loaded from the Excel file per intent.
