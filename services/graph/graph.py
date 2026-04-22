@@ -83,6 +83,9 @@ def build_graph():
 
     # WRITE path: payload_filler_node → END (multi-turn, no SQL)
     g.add_edge("payload_filler_node", END)
+    # I have to visualize the workflow and the nodes with stategraph diagram to make sure the edges are correct with code
+    #code to visualize the graph
+    # g.visualize("graph_diagram.png")
 
     compiled = g.compile()
     logger.info("[Graph] LangGraph pipeline compiled successfully.")
@@ -91,3 +94,20 @@ def build_graph():
 
 # Singleton — compiled once at import time
 pipeline = build_graph()
+
+#main function to run the visualization of the graph
+if __name__ == "__main__":
+    import sys, os
+    # ensure project root is on path when run directly
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+    
+    graph = build_graph()
+    
+    try:
+        img_bytes = graph.get_graph().draw_mermaid_png()
+        with open("graph_diagram.png", "wb") as f:
+            f.write(img_bytes)
+        print("✅ Saved graph_diagram.png")
+    except Exception as e:
+        print(f"PNG failed ({e}), falling back to mermaid text:\n")
+        print(graph.get_graph().draw_mermaid())
