@@ -31,6 +31,7 @@ App available at: `http://localhost:8001`
 ```
 ANTHROPIC_API_KEY=your_key_here
 COMPANY_ID=1
+DATABASE_URL=postgresql://user:password@host:port/dbname
 ```
 
 ---
@@ -40,7 +41,7 @@ COMPANY_ID=1
 ```
 Zenie_AI/
 ├── app/
-│   ├── main.py                        # FastAPI app entry point, mounts router + static files
+│   ├── main.py                        # FastAPI app entry point, mounts router + static files, tests DB connection
 │   ├── controllers/
 │   │   └── chat_controller.py         # Receives ChatRequest, calls process_message(), returns ChatResponse
 │   ├── routes/
@@ -49,12 +50,14 @@ Zenie_AI/
 │   │   └── chat_schema.py             # Pydantic models: ChatRequest, ChatResponse, Message
 │   └── static/
 │       ├── index.html                 # Web UI
-│       ├── script.js                  # Frontend logic: send message, render panels, copy SQL
+│       ├── script.js                  # Frontend logic: send message, render panels, display DB results in chat
 │       └── style.css                  # Dark theme styles
 │
 ├── services/
 │   ├── message_service.py             # Entry point: builds initial state, invokes LangGraph pipeline
 │   ├── date_extractor_lib.py          # Rule-based financial date extractor (no LLM)
+│   ├── db/
+│   │   └── db_query_executor.py       # Executes raw SQL via SQLAlchemy; returns JSON-serializable results
 │   └── graph/
 │       ├── __init__.py
 │       ├── state.py                   # GraphState TypedDict (shared state across all nodes)
@@ -64,11 +67,12 @@ Zenie_AI/
 │           ├── orchestrator.py        # Passthrough node — entry point of the graph
 │           ├── intent_classifier.py   # Semantic search: SentenceTransformer + cosine similarity
 │           ├── date_extractor.py      # Calls date_extractor_lib, serializes result to state
-│           ├── sql_generator.py       # MockSQLDatabase + create_sql_query_chain (Claude)
+│           ├── sql_generator.py       # MockSQLDatabase + create_sql_query_chain (Claude) + DB execution
 │           └── LLM_payload_filler.py  # Multi-turn field collector for WRITE intents
 │
 ├── core/
 │   ├── config.py                      # Logging config + DUMMY_FIELDS / DUMMY_APIS for CREATE_INVOICE
+│   ├── database.py                    # SQLAlchemy engine + session factory (QueuePool, loaded from DATABASE_URL)
 │   └── storage.py                     # FieldStorage class: tracks collected/missing fields per session
 │
 ├── data/
@@ -77,7 +81,7 @@ Zenie_AI/
 │   └── models/
 │       └── all-MiniLM-L6-v2/          # Local sentence transformer model (cached after first download)
 │
-├── .env                               # API keys (not committed)
+├── .env                               # API keys and DATABASE_URL (not committed)
 ├── requirements.txt                   # Python dependencies
 └── readme.md                          # This file
 ```
@@ -111,7 +115,7 @@ POST /api/v1/chat/
  └────────────────────────────────────────────────────────────────────────┘
        │
        ▼
- READ:  ChatResponse { response: SQL,   data: { intent, date_range, sql_query, logs } }
+ READ:  ChatResponse { response: SQL,   data: { intent, date_range, sql_query, query_result, logs } }
  WRITE: ChatResponse { response: reply, data: { intent, current_data, logs } }
 ```
 
@@ -122,7 +126,7 @@ POST /api/v1/chat/
 | `orchestrator` | `nodes/orchestrator.py` | Passthrough. Logs message receipt. Placeholder for future preprocessing. |
 | `intent_classifier` | `nodes/intent_classifier.py` | Encodes query with `all-MiniLM-L6-v2`, runs cosine similarity against intent embeddings, returns top match including `action_type`. |
 | `date_extractor` | `nodes/date_extractor.py` | Rule-based extraction of single periods and comparison ranges (no LLM). Returns `{ primary, secondary, is_comparison }`. READ path only. |
-| `sql_generator` | `nodes/sql_generator.py` | Builds `MockSQLDatabase` from `view_metadata.py`, runs `create_sql_query_chain` with Claude, validates output, returns SQL. READ path only. |
+| `sql_generator` | `nodes/sql_generator.py` | Builds `MockSQLDatabase` from `view_metadata.py`, runs `create_sql_query_chain` with Claude, validates output, executes SQL via `db_query_executor`, returns both SQL and results. READ path only. |
 | `payload_filler_node` | `nodes/LLM_payload_filler.py` | Multi-turn field collector for WRITE intents. Calls LLM with a dynamic system prompt, parses JSON response, updates session-scoped `FieldStorage`. WRITE path only. |
 
 ### GraphState keys
@@ -139,6 +143,7 @@ POST /api/v1/chat/
 | `intent_logs` | `intent_classifier` | Log lines from intent classifier |
 | `date_logs` | `date_extractor` | Log lines from date extractor |
 | `sql_query` | `sql_generator` | Final generated SQL string — READ only |
+| `query_result` | `sql_generator` | DB execution result `{ success, data, row_count }` or `{ success, error }` — READ only |
 | `response` | `sql_generator` | Response text (same as sql_query on success) — READ only |
 | `logs` | `sql_generator` | Merged logs from all nodes — READ only |
 | `current_data` | `payload_filler_node` | Accumulated field values collected during WRITE conversation |
@@ -203,6 +208,16 @@ _KEYWORD_RULES: list[tuple[re.Pattern, str]] = [
 
 When a new `action_type` is introduced (e.g. `ANALYSE`), add its rows to `Intent_file.xlsx` with that value in the `Action_Type (READ/WRITE)` column — the mask is built automatically at startup from the live data, so no code change is needed beyond the Excel update.
 
+### `core/database.py`
+Configures the SQLAlchemy connection pool (`QueuePool`) from `DATABASE_URL` in `.env`. Exposes `engine`, `SessionLocal`, `Base`, and a `get_db()` dependency. The pool is shared across the entire process — `sql_generator_node` and `db_query_executor` both reuse these connections.
+
+### `services/db/db_query_executor.py`
+Single function `execute_query(sql: str) -> dict`. Runs the SQL against the live database via `engine.connect()` and returns a JSON-safe dict:
+- Success: `{ "success": True, "data": [{"col": value, ...}], "row_count": N }`
+- Failure: `{ "success": False, "error": "..." }`
+
+`Decimal` values from PostgreSQL are automatically converted to `float` so the result is directly JSON-serializable.
+
 ### `core/config.py`
 Holds `DUMMY_FIELDS` and `DUMMY_APIS` — the field definitions for the `CREATE_INVOICE` WRITE intent. These are currently hardcoded as a placeholder; in production they will be loaded from the Excel file per intent.
 
@@ -263,7 +278,7 @@ The frontend (`app/static/`) has four sections:
 
 | Section | Description |
 |---|---|
-| **Chat window** | Conversation history — user messages and bot responses |
+| **Chat window** | Conversation history — user messages and formatted DB query results (READ) or NL replies (WRITE) |
 | **Intent panel** | Shows matched intent: code, name, category, view, similarity %, action_type |
 | **Date panel** | Shows extracted date range(s) — READ flow only |
 | **SQL panel** | Generated SQL with Copy button — READ flow only |
@@ -296,7 +311,8 @@ READ response:
     "intent": { "intent_code": "TOP_CUSTOMERS_REPORT_VIEW", "action_type": "READ", ... },
     "date_range": { "primary": { "start": "2026-01-01", "end": "2026-12-31" }, "is_comparison": false },
     "sql_query": "SELECT ...",
-    "logs": ["[Orchestrator] ...", "[IntentClassifier] ...", "[DateExtractor] ...", "[SQLGenerator] ..."]
+    "query_result": { "success": true, "data": [{"customer_name": "Dhoni", "total_transactions": 30}], "row_count": 1 },
+    "logs": ["[Orchestrator] ...", "[IntentClassifier] ...", "[DateExtractor] ...", "[SQLGenerator] ...", "[SQLGenerator] Query executed: 1 rows returned"]
   }
 }
 ```

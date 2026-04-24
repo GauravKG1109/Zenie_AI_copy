@@ -42,6 +42,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_classic.chains.sql_database.query import create_sql_query_chain
 from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import PromptTemplate
+from services.db.db_query_executor import execute_query
 
 load_dotenv()
 
@@ -215,7 +216,7 @@ def _build_optional_filter_instruction(optional_params: str) -> str:
 
 def _build_mandatory_where(views_meta: dict, company_id: str,
                             date_from: str, date_to: str) -> str:
-    lines = [f"  company_id = {company_id}"]
+    lines = [f"  company_uuid = '{company_id}'"]
     if date_from and date_to:
         date_cols = list(dict.fromkeys(
             m["date_column"] for m in views_meta.values() if m.get("date_column")
@@ -273,10 +274,18 @@ def sql_generator_node(state: GraphState) -> dict:
     if sql_query_manual:
         log_line = "[SQLGenerator] Using pre-written SQL from Intent_file.xlsx"
         logger.info(log_line)
+        query_result = execute_query(sql_query_manual)
+        log_exec = (
+            f"[SQLGenerator] Query executed: {query_result.get('row_count', 0)} rows returned"
+            if query_result.get("success")
+            else f"[SQLGenerator] Query failed: {query_result.get('error', 'Unknown error')}"
+        )
+        logger.info(log_exec)
         return {
-            "sql_query": sql_query_manual,
-            "response":  sql_query_manual,
-            "logs":      merged_logs + [log_line],
+            "sql_query":    sql_query_manual,
+            "query_result": query_result,
+            "response":     sql_query_manual,
+            "logs":         merged_logs + [log_line, log_exec],
         }
 
     # ── Resolve views ─────────────────────────────────────────────────────────
@@ -350,8 +359,18 @@ def sql_generator_node(state: GraphState) -> dict:
         f"for views: [{', '.join(views_meta.keys())}]"
     )
     logger.info(log_line)
+
+    query_result = execute_query(sql)
+    log_exec = (
+        f"[SQLGenerator] Query executed: {query_result.get('row_count', 0)} rows returned"
+        if query_result.get("success")
+        else f"[SQLGenerator] Query failed: {query_result.get('error', 'Unknown error')}"
+    )
+    logger.info(log_exec)
+
     return {
-        "sql_query": sql,
-        "response":  sql,
-        "logs":      merged_logs + [log_line],
+        "sql_query":    sql,
+        "query_result": query_result,
+        "response":     sql,
+        "logs":         merged_logs + [log_line, log_exec],
     }

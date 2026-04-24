@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.routes import chat
+from core.database import get_db, engine
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,18 @@ app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+# Establish database connection and create tables on startup
+try:
+    # Test the database connection
+    with engine.connect() as connection:
+        logger.info("[Startup] Successfully connected to the database.")
+    # Create tables if they don't exist
+    from core.database import Base  # Import Base after engine is defined
+    Base.metadata.create_all(bind=engine)
+    logger.info("[Startup] Database tables created or verified successfully.")
+except Exception as e:
+    logger.error(f"[Startup] Database connection failed: {e}")
+    
 
 @app.on_event("startup")
 async def preload_pipeline():

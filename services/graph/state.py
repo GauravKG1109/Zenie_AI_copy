@@ -13,6 +13,7 @@ class GraphState(TypedDict):
     date_logs: List[str]
     orchestrator_logs: List[str]
     sql_query: str        # set by sql_generator
+    query_result: dict    # set by sql_generator after executing the SQL query
     response: str         # final response text
     logs: List[str]       # merged logs assembled in sql_generator
     current_data: dict    # collected field values for WRITE flow (payload_filler_node)

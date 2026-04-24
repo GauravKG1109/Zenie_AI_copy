@@ -104,11 +104,16 @@ function handleStreamChunk(chunk) {
   // Date panel — populated when date_extractor node finishes
   if (chunk.date_range) renderDate(chunk.date_range);
 
-  // SQL panel + bot message — populated when sql_generator node finishes (READ path)
+  // SQL panel — populated when sql_generator node finishes (READ path)
   if (chunk.sql_query) {
     document.getElementById("sqlOutput").innerText = chunk.sql_query;
-    addMessage("bot", chunk.sql_query);
-    history.push({ role: "assistant", content: chunk.sql_query });
+  }
+
+  // Query results — displayed in chat window (READ path)
+  if (chunk.query_result) {
+    const msg = formatQueryResult(chunk.query_result);
+    addMessage("bot", msg);
+    history.push({ role: "assistant", content: msg });
   }
 
   // Bot reply — populated when payload_filler_node finishes (WRITE path)
@@ -116,6 +121,34 @@ function handleStreamChunk(chunk) {
     addMessage("bot", chunk.reply);
     history.push({ role: "assistant", content: chunk.reply });
   }
+}
+
+function formatQueryResult(qr) {
+  if (!qr.success) {
+    return "Query error: " + (qr.error || "Unknown error");
+  }
+  if (!qr.data || qr.data.length === 0) {
+    return "Query returned no results.";
+  }
+  const rows = qr.data;
+  const keys = Object.keys(rows[0]);
+
+  // Single value (e.g. COUNT or SUM aggregate): show inline
+  if (rows.length === 1 && keys.length === 1) {
+    return keys[0] + ": " + rows[0][keys[0]];
+  }
+
+  // Single row, multiple columns
+  if (rows.length === 1) {
+    return keys.map(k => k + ": " + rows[0][k]).join("\n");
+  }
+
+  // Multiple rows
+  let text = qr.row_count + " row" + (qr.row_count !== 1 ? "s" : "") + " returned:\n";
+  rows.forEach((row, i) => {
+    text += "\n[" + (i + 1) + "] " + keys.map(k => k + ": " + row[k]).join(" | ");
+  });
+  return text;
 }
 
 async function sendMessage() {

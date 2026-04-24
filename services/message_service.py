@@ -11,6 +11,7 @@ _INITIAL_STATE_TEMPLATE = {
     "date_logs": [],
     "orchestrator_logs": [],
     "sql_query": "",
+    "query_result": {},
     "response": "",
     "logs": [],
     # WRITE flow fields
@@ -71,15 +72,16 @@ async def process_message(message: str, history: list, metadata: dict) -> dict:
             },
         }
 
-    # READ flow: sql_generator sets "sql_query"
+    # READ flow: sql_generator sets "sql_query" and "query_result"
     sql = result.get("sql_query") or ""
     return {
         "response": sql or "Could not generate SQL for this query.",
         "data": {
-            "intent":     result.get("intent"),
-            "date_range": result.get("date_range"),
-            "sql_query":  sql,
-            "logs":       result.get("logs", []),
+            "intent":        result.get("intent"),
+            "date_range":    result.get("date_range"),
+            "sql_query":     sql,
+            "query_result":  result.get("query_result", {}),
+            "logs":          result.get("logs", []),
         },
     }
 
@@ -93,7 +95,7 @@ async def stream_message(
 
     Event shape:
         { "node": str, "logs": [str], "intent"?: dict,
-          "date_range"?: dict, "sql_query"?: str,
+          "date_range"?: dict, "sql_query"?: str, "query_result"?: dict,
           "reply"?: str, "current_data"?: dict }
     """
     from services.graph.graph import pipeline
@@ -117,6 +119,8 @@ async def stream_message(
                 event["date_range"] = updates["date_range"]
             if "sql_query" in updates and updates["sql_query"]:
                 event["sql_query"] = updates["sql_query"]
+            if "query_result" in updates and updates["query_result"]:
+                event["query_result"] = updates["query_result"]
             # WRITE flow fields
             if "reply" in updates and updates["reply"]:
                 event["reply"] = updates["reply"]
