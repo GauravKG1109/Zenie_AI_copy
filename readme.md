@@ -13,7 +13,7 @@ A FastAPI-based financial chatbot that takes a natural language query, classifie
 source venv/bin/activate
 
 # Start server
-uvicorn app.main:app --reload --port 8001
+uvicorn app.main:app --reload --port 8002
 ```
 
 App available at: `http://localhost:8001`

@@ -7,5 +7,10 @@ venv/
 __pycache__/
 
 #locally downloaded SLM models via ollama and their cache
-
+# AI Models
+data/models/
+*.safetensors
+*.bin
+*.pt
+*.onnx
 ollama_models/
