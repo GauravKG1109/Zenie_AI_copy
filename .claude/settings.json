@@ -5,7 +5,15 @@
       "Bash(python3 -m json.tool)",
       "Bash(curl -s -X POST http://localhost:8001/api/v1/chat/ -H 'Content-Type: application/json' -d '{:*)",
       "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l[6:]\\).get\\('node'\\), '|', json.loads\\(l[6:]\\).get\\('reply',''\\)[:80] if json.loads\\(l[6:]\\).get\\('reply'\\) else json.loads\\(l[6:]\\).get\\('logs',[]\\)\\) for l in sys.stdin if l.startswith\\('data:'\\) and l.strip\\(\\) != 'data:']\")",
-      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l[6:]\\).get\\('node'\\), '|', \\(json.loads\\(l[6:]\\).get\\('sql_query',''\\)[:60] or json.loads\\(l[6:]\\).get\\('logs',[]\\)\\)\\) for l in sys.stdin if l.startswith\\('data:'\\) and l.strip\\(\\) != 'data:']\")"
+      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l[6:]\\).get\\('node'\\), '|', \\(json.loads\\(l[6:]\\).get\\('sql_query',''\\)[:60] or json.loads\\(l[6:]\\).get\\('logs',[]\\)\\)\\) for l in sys.stdin if l.startswith\\('data:'\\) and l.strip\\(\\) != 'data:']\")",
+      "Bash(python -c \"from services.graph.graph import pipeline; print\\('Graph compiled OK'\\)\")",
+      "Bash(curl -s http://localhost:8000/)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"hi there\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-none-001\"}}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"show me total amount of all transactions\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-read-001\"}}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"show me sales by customer for this month\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-read-002\"}}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\",\"message\":\"create an invoice for Dhoni for 5000 rupees\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\"}}')"
     ]
   }
 }

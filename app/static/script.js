@@ -20,8 +20,10 @@ function generateSession() {
   document.getElementById("sqlOutput").innerText = "— SQL will appear here after you send a message —";
   document.getElementById("intentOutput").innerHTML = '<span class="placeholder">— will populate after a message —</span>';
   document.getElementById("dateOutput").innerHTML = '<span class="placeholder">— will populate after a message —</span>';
+  document.getElementById("writeResultOutput").innerHTML = '<span class="placeholder">— will populate after WRITE completes —</span>';
+  document.getElementById("notificationBanner").style.display = "none";
   document.getElementById("logWindow").innerHTML = "";
-  log("🔄 New session started");
+  log("New session started");
 }
 
 function addMessage(role, text) {
@@ -116,11 +118,43 @@ function handleStreamChunk(chunk) {
     history.push({ role: "assistant", content: msg });
   }
 
-  // Bot reply — populated when payload_filler_node finishes (WRITE path)
+  // Bot reply — populated when payload_filler_node or end_with_reply finishes
   if (chunk.reply) {
     addMessage("bot", chunk.reply);
     history.push({ role: "assistant", content: chunk.reply });
   }
+
+  // Write notification — WRITE confirmed and submitted
+  if (chunk.write_notification) {
+    handleWriteNotification(chunk.write_notification);
+  }
+}
+
+function handleWriteNotification(notif) {
+  showNotificationBanner(notif.intent_name + " submitted successfully!", "success");
+  renderWriteResult(notif);
+  log("[WriteAPI] " + notif.intent_code + " submitted. Status: " + notif.status);
+}
+
+function showNotificationBanner(text, type) {
+  const banner = document.getElementById("notificationBanner");
+  banner.textContent = text;
+  banner.className = "notification-banner " + type;
+  banner.style.display = "block";
+  setTimeout(() => { banner.style.display = "none"; }, 4000);
+}
+
+function renderWriteResult(notif) {
+  const panel = document.getElementById("writeResultOutput");
+  if (!notif || !notif.payload) return;
+  const rows = Object.entries(notif.payload)
+    .map(([k, v]) => `<div class="info-row-item"><span class="info-label">${k}</span><span class="info-value code-tag">${v ?? "—"}</span></div>`)
+    .join("");
+  panel.innerHTML = `
+    <div class="info-row-item"><span class="info-label">Intent</span><span class="info-value code-tag">${notif.intent_code}</span></div>
+    <div class="info-row-item"><span class="info-label">Status</span><span class="info-value">${notif.status}</span></div>
+    <hr style="border-color:#1e293b; margin:6px 0;">${rows}
+  `;
 }
 
 function formatQueryResult(qr) {

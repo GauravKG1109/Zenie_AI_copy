@@ -66,6 +66,10 @@ body {
   border: 1px solid #10b98166;
 }
 
+.write-panel {
+  border: 1px solid #f59e0b66;
+}
+
 .info-panel h3 {
   margin: 0 0 10px 0;
   font-size: 13px;
@@ -73,8 +77,9 @@ body {
   letter-spacing: 0.05em;
 }
 
-.intent-panel h3 { color: #a78bfa; }
-.date-panel h3   { color: #34d399; }
+.intent-panel h3  { color: #a78bfa; }
+.date-panel h3    { color: #34d399; }
+.write-panel h3   { color: #f59e0b; }
 
 .info-body {
   font-size: 13px;
@@ -187,4 +192,25 @@ body {
 button {
   padding: 8px 12px;
   cursor: pointer;
+}
+
+/* ── Notification banner ─────────────────────────────────────────────────── */
+.notification-banner {
+  padding: 10px 16px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.notification-banner.success {
+  background: #1a4a2e;
+  color: #4ade80;
+  border: 1px solid #4ade8066;
+}
+
+.notification-banner.error {
+  background: #4a1a1a;
+  color: #f87171;
+  border: 1px solid #f8717166;
 }

@@ -224,6 +224,9 @@ def _get_action_filter(message: str) -> np.ndarray | None:
 
 # ── Intent lookup ─────────────────────────────────────────────────────────────
 
+_CANDIDATE_N = 5   # number of candidate intents returned to the orchestrator
+
+
 def _parse_views(raw: str) -> list[str]:
     return [v.strip() for v in re.split(r'[,;]+', raw) if v.strip()][:4]
 
@@ -272,10 +275,78 @@ def _find_intent(query: str) -> dict:
     }
 
 
+def _find_top_n_intents(query: str, n: int = _CANDIDATE_N) -> list[dict]:
+    """
+    Returns top-N slim intent dicts for the orchestrator.
+    Each dict: {intent_code, description, action_type, similarity}
+    Applies the same keyword pre-filter as _find_intent.
+    """
+    vec = _model.encode(query).reshape(1, -1)
+
+    action_filter = _get_action_filter(query)
+    if action_filter is not None:
+        filtered_matrix = _embedding_matrix[action_filter]
+        filtered_df     = _df[action_filter].reset_index(drop=True)
+    else:
+        filtered_matrix = _embedding_matrix
+        filtered_df     = _df
+
+    sims        = cosine_similarity(vec, filtered_matrix)[0]
+    top_indices = np.argsort(sims)[::-1][:n]
+
+    return [
+        {
+            "intent_code": str(filtered_df.iloc[int(i)]["Intent_Code"]),
+            "description": str(filtered_df.iloc[int(i)]["Description"]),
+            "action_type": str(filtered_df.iloc[int(i)].get("Action_Type (READ/WRITE)", "")),
+            "similarity":  round(float(sims[int(i)]), 4),
+        }
+        for i in top_indices
+    ]
+
+
+def _find_intent_by_code(intent_code: str) -> dict | None:
+    """
+    Looks up the full intent dict by exact Intent_Code.
+    Used by orchestrator when it picks a candidate that isn't the classifier's top-1.
+    Returns None if not found.
+    """
+    matches = _df[_df["Intent_Code"].astype(str) == intent_code]
+    if matches.empty:
+        return None
+    row      = matches.iloc[0]
+    view_raw = str(row["View"]) if pd.notna(row.get("View")) else ""
+    views    = _parse_views(view_raw)
+    sql_val          = row.get("SQL_Query")
+    sql_query_manual = (
+        str(sql_val).strip()
+        if pd.notna(sql_val) and str(sql_val).strip()
+        else ""
+    )
+    return {
+        "similarity":          None,
+        "intent_code":         str(row["Intent_Code"]),
+        "intent_name":         str(row["Intent_Name"]),
+        "intent_category":     str(row["Intent_Category"]),
+        "action_type":         str(row.get("Action_Type (READ/WRITE)", "")),
+        "description":         str(row["Description"]),
+        "required_parameters": str(row["Required_Parameters"]) if pd.notna(row.get("Required_Parameters")) else "None",
+        "optional_parameters": str(row["Optional_Parameters"]) if pd.notna(row.get("Optional_Parameters")) else "None",
+        "security_scope":      str(row["Security_Scope"])          if pd.notna(row.get("Security_Scope"))          else "N/A",
+        "human_approval":      str(row["Human_Approval_Required"]) if pd.notna(row.get("Human_Approval_Required")) else "No",
+        "status":              str(row["Status"]),
+        "view":                view_raw,
+        "views":               views,
+        "sql_query_manual":    sql_query_manual,
+    }
+
+
 def intent_classifier_node(state: GraphState) -> dict:
     message = state.get("message", "")
     logger.info("[IntentClassifier] Classifying: %s", message)
-    intent  = _find_intent(message)
+
+    intent     = _find_intent(message)
+    candidates = _find_top_n_intents(message)
 
     views_str  = ", ".join(intent["views"]) if intent["views"] else "none"
     has_manual = bool(intent["sql_query_manual"])
@@ -284,8 +355,15 @@ def intent_classifier_node(state: GraphState) -> dict:
         f"({intent['similarity']}% similarity) → views: [{views_str}]"
         + (" | pre-written SQL found" if has_manual else "")
     )
+    log_candidates = (
+        f"[IntentClassifier] Top-{len(candidates)} candidates: "
+        + ", ".join(f"{c['intent_code']}({c['similarity']:.3f})" for c in candidates)
+    )
     logger.info(log_line)
+    logger.info(log_candidates)
+
     return {
-        "intent":      intent,
-        "intent_logs": [log_line],
+        "intent":            intent,
+        "candidate_intents": candidates,
+        "intent_logs":       [log_line, log_candidates],
     }

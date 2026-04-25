@@ -42,16 +42,40 @@ ACTIVE_MODEL = "claude"   # options: "claude" | "gpt" | "qwen"
 #
 # Both dicts are in-process (lost on server restart). Swap for Redis in production.
 _session_store: dict = {}
-_active_write_sessions: dict = {}  # session_id → intent dict
+_active_write_sessions: dict = {}       # session_id → intent dict
+_active_confirmation_sessions: dict = {}  # session_id → complete payload dict (awaiting yes/no)
 
 
 def get_active_write_intent(session_id: str) -> Optional[dict]:
-    """
-    Returns the stored intent dict if session_id has an in-progress WRITE
-    conversation, or None if it doesn't.
-    Called by the graph router (graph.py) before intent classification.
-    """
+    """Returns stored intent dict if session has an in-progress WRITE, else None."""
     return _active_write_sessions.get(session_id)
+
+
+def clear_write_session(session_id: str) -> None:
+    """
+    Evicts all write-session state for a session_id.
+    Called by message_service when the orchestrator routes away from a WRITE intent
+    (e.g. user switched topics mid-invoice) so the next WRITE starts fresh.
+    """
+    _active_write_sessions.pop(session_id, None)
+    _active_confirmation_sessions.pop(session_id, None)
+
+
+def _check_user_confirmation(message: str) -> str:
+    """
+    Rule-based confirmation check — returns 'yes', 'no', or 'unclear'.
+    No LLM call: fast, deterministic, cheap.
+    """
+    msg = message.lower().strip()
+    yes_tokens = {"yes", "y", "confirm", "proceed", "ok", "okay", "go ahead",
+                  "sure", "do it", "submit", "yep", "yup", "please", "correct"}
+    no_tokens  = {"no", "n", "cancel", "stop", "abort", "dont", "don't",
+                  "no thanks", "nope", "nah", "discard"}
+    if any(tok in msg for tok in yes_tokens):
+        return "yes"
+    if any(tok in msg for tok in no_tokens):
+        return "no"
+    return "unclear"
 
 
 # ── Qwen 2.5 7B via Ollama ────────────────────────────────────────────────────
@@ -279,47 +303,88 @@ def process_message(
 
 def payload_filler_node(state: GraphState) -> dict:
     """
-    LangGraph node for WRITE intents.
-    Signature must be exactly (state: GraphState) -> dict — LangGraph passes only state.
+    LangGraph node for WRITE intents. Three-phase flow:
 
-    Collects form fields across multiple conversation turns using session-scoped
-    FieldStorage (_session_store keyed by (session_id, intent_code)).
+    Phase 0 — field collection: LLM asks for missing fields turn by turn.
+    Phase 1 — summary + confirm: all fields gathered → ask user yes/no.
+    Phase 2 — confirmation: user says yes/no → fire write_notification or cancel.
     """
     message    = state.get("message", "")
     session_id = state.get("session_id", "default")
 
-    # If intent_classifier was bypassed (resume turn), restore intent from the
-    # active-session store so we know which intent we are continuing.
     intent = state.get("intent") or {}
     if not intent or not intent.get("intent_code"):
         intent = _active_write_sessions.get(session_id, {})
 
     intent_name = intent.get("intent_name", "unknown")
     intent_code = intent.get("intent_code", "unknown")
+    store_key   = (session_id, intent_code)
 
-    # Register this session as an active WRITE conversation (idempotent).
-    # This is what the graph router checks on the NEXT user turn to bypass
-    # intent_classifier and come straight here.
+    # ── Phase 2 check — awaiting confirmation from previous turn ──────────────
+    pending = _active_confirmation_sessions.get(session_id)
+    if pending:
+        answer = _check_user_confirmation(message)
+        logger.info("[PayloadFiller] Confirmation answer=%s for %s/%s", answer, session_id, intent_code)
+
+        if answer == "yes":
+            write_notification = {
+                "intent_code": intent_code,
+                "intent_name": intent_name,
+                "payload":     pending,
+                "status":      "ready",
+            }
+            _active_confirmation_sessions.pop(session_id, None)
+            _session_store.pop(store_key, None)
+            _active_write_sessions.pop(session_id, None)
+            reply = f"Done! Your {intent_name} has been submitted successfully."
+            logger.info("[PayloadFiller] WRITE confirmed and submitted for %s/%s", session_id, intent_code)
+            return {
+                "intent":             intent,
+                "current_data":       pending,
+                "reply":              reply,
+                "write_notification": write_notification,
+                "payload_logs": [f"[PayloadFiller] WRITE confirmed → write_notification set for {intent_code}"],
+            }
+
+        elif answer == "no":
+            _active_confirmation_sessions.pop(session_id, None)
+            _session_store.pop(store_key, None)
+            _active_write_sessions.pop(session_id, None)
+            reply = "Understood — I've cancelled the request. Let me know if you'd like to start over."
+            logger.info("[PayloadFiller] WRITE cancelled for %s/%s", session_id, intent_code)
+            return {
+                "intent": intent, "current_data": {}, "reply": reply,
+                "write_notification": None,
+                "payload_logs": [f"[PayloadFiller] WRITE cancelled by user for {intent_code}"],
+            }
+
+        else:
+            # Ambiguous — re-ask
+            reply = f"I have all the required information. Shall I proceed with {intent_name}? Please reply yes or no."
+            return {
+                "intent": intent, "current_data": pending, "reply": reply,
+                "write_notification": None,
+                "payload_logs": ["[PayloadFiller] Re-requesting confirmation (ambiguous answer)"],
+            }
+
+    # ── Register session as active WRITE (idempotent) ─────────────────────────
     _active_write_sessions[session_id] = intent
 
     chat_history = state.get("history", [])
 
-    # ── Session-scoped FieldStorage ───────────────────────────────────────────
-    store_key = (session_id, intent_code)
+    # ── Phase 0 — field collection ────────────────────────────────────────────
     if store_key not in _session_store:
         _session_store[store_key] = FieldStorage(required_fields=list(DUMMY_FIELDS.keys()))
         logger.info("[PayloadFiller] New session: session_id=%s intent=%s", session_id, intent_code)
 
     storage = _session_store[store_key]
 
-    # Merge any previously collected data passed through state (multi-turn continuity)
     for field, value in state.get("current_data", {}).items():
         if value is not None:
             storage.set_data(field, value)
 
     current_data = storage.get_data()
 
-    # ── Call LLM ──────────────────────────────────────────────────────────────
     raw_response = process_message(
         message=message,
         intent_name=intent_name,
@@ -328,29 +393,19 @@ def payload_filler_node(state: GraphState) -> dict:
     )
     logger.debug("[PayloadFiller] Raw LLM response: %.300s", raw_response)
 
-    # ── Parse JSON with robust fallback ───────────────────────────────────────
-    # BUG FIX: raw_response is now a string; old code did json.loads(AIMessage_obj)
     parsed = _extract_json(raw_response)
-
     if parsed:
         extracted_fields = parsed.get("extracted_fields", {})
         reply = parsed.get("reply", "")
     else:
         extracted_fields = {}
         reply = "I had trouble parsing that response. Could you please try again?"
-        logger.warning("[PayloadFiller] Could not extract JSON from response: %.200s", raw_response)
+        logger.warning("[PayloadFiller] Could not extract JSON: %.200s", raw_response)
 
-    # ── Update storage ────────────────────────────────────────────────────────
     new_logs = []
     for field, value in extracted_fields.items():
         _, msg = storage.update_field(field, value)
         new_logs.append(f"[PayloadFiller] {msg}: {field} = {value}")
-
-    # Evict session stores when all fields are complete
-    if storage.is_complete():
-        logger.info("[PayloadFiller] All fields complete — clearing stores for %s/%s", session_id, intent_code)
-        del _session_store[store_key]
-        _active_write_sessions.pop(session_id, None)  # deregister; next msg → fresh classification
 
     log_line = (
         f"[PayloadFiller] intent={intent_name} | "
@@ -359,9 +414,31 @@ def payload_filler_node(state: GraphState) -> dict:
     )
     logger.info(log_line)
 
+    # ── Phase 1 — all fields complete: ask for confirmation ───────────────────
+    if storage.is_complete():
+        logger.info("[PayloadFiller] All fields complete — entering confirmation phase for %s/%s", session_id, intent_code)
+        complete_data = storage.get_data().copy()
+        _active_confirmation_sessions[session_id] = complete_data
+
+        summary = "\n".join(f"  {k}: {v}" for k, v in complete_data.items() if v is not None)
+        reply = (
+            f"I have all the required information:\n{summary}\n\n"
+            f"Shall I proceed with {intent_name}? (yes / no)"
+        )
+        return {
+            "intent":             intent,
+            "current_data":       complete_data,
+            "reply":              reply,
+            "write_notification": None,
+            "payload_logs":       [log_line] + new_logs + [
+                f"[PayloadFiller] All fields complete — awaiting confirmation for {intent_code}"
+            ],
+        }
+
     return {
-        "intent":       intent,          # keep intent visible in state for frontend display
-        "current_data": storage.get_data(),
-        "reply":        reply,
-        "payload_logs": [log_line] + new_logs,
+        "intent":             intent,
+        "current_data":       storage.get_data(),
+        "reply":              reply,
+        "write_notification": None,
+        "payload_logs":       [log_line] + new_logs,
     }

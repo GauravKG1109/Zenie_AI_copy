@@ -17,6 +17,9 @@
     <button onclick="generateSession()">🔄 Reset</button>
   </div>
 
+  <!-- Notification Banner -->
+  <div id="notificationBanner" class="notification-banner" style="display:none;"></div>
+
   <!-- Chat Window -->
   <div id="chatWindow" class="chat-window"></div>
 
@@ -45,6 +48,14 @@
       </div>
     </div>
 
+    <!-- Write Result Panel -->
+    <div class="info-panel write-panel">
+      <h3>Write Result</h3>
+      <div class="info-body" id="writeResultOutput">
+        <span class="placeholder">— will populate after WRITE completes —</span>
+      </div>
+    </div>
+
   </div>
 
   <!-- SQL Panel -->
@@ -64,6 +75,6 @@
 
 </div>
 
-<script src="/static/script.js?v=3"></script>
+<script src="/static/script.js?v=4"></script>
 </body>
 </html>
