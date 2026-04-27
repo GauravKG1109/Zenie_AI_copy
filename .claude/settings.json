@@ -13,7 +13,8 @@
       "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"show me total amount of all transactions\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-read-001\"}}')",
       "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"show me sales by customer for this month\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-read-002\"}}')",
       "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{ *)",
-      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\",\"message\":\"create an invoice for Dhoni for 5000 rupees\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\"}}')"
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/chat/stream -H 'Content-Type: application/json' -d '{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\",\"message\":\"create an invoice for Dhoni for 5000 rupees\",\"history\":[],\"metadata\":{\"company_id\":\"019cfba4-f83a-7fd9-80e3-cddca906e7db\",\"session_id\":\"test-write-001\"}}')",
+      "Bash(curl -s -X POST http://localhost:8000/admin/reload-kb)"
     ]
   }
 }

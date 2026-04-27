@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.routes import chat
+from app.routes import chat, admin
 from core.database import get_db, engine
 
 
@@ -18,6 +18,7 @@ app = FastAPI(
 
 # Include the chat router
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+app.include_router(admin.router, tags=["Admin"])
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

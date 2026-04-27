@@ -46,7 +46,8 @@ Zenie_AI/
 │   ├── controllers/
 │   │   └── chat_controller.py         # Receives ChatRequest, calls process_message(), returns ChatResponse
 │   ├── routes/
-│   │   └── chat.py                    # POST /api/v1/chat/, POST /api/v1/chat/stream, WebSocket /ws
+│   │   ├── chat.py                    # POST /api/v1/chat/, POST /api/v1/chat/stream, WebSocket /ws
+│   │   └── admin.py                   # POST /admin/reload-kb — force re-embed knowledge base after .md update
 │   ├── schemas/
 │   │   └── chat_schema.py             # Pydantic models: ChatRequest, ChatResponse, Message
 │   └── static/
@@ -70,7 +71,7 @@ Zenie_AI/
 │           ├── date_extractor.py      # Calls date_extractor_lib, serializes result to state
 │           ├── sql_generator.py       # MockSQLDatabase + create_sql_query_chain (Claude) + DB execution
 │           ├── LLM_payload_filler.py  # Multi-turn field collector + 3-phase confirmation for WRITE intents
-│           └── get_knowledgebase.py   # Stub node: returns placeholder reply for GET_KNOWLEDGEBASE routing
+│           └── get_knowledgebase.py   # RAG node: retrieves KB chunks, answers with Claude Haiku (grounded)
 │
 ├── core/
 │   ├── config.py                      # Logging config + DUMMY_FIELDS / DUMMY_APIS for CREATE_INVOICE
@@ -80,6 +81,9 @@ Zenie_AI/
 ├── data/
 │   ├── Intent_file.xlsx               # Intent library — single source of truth for all intents
 │   ├── view_metadata.py               # Column metadata for each database view (developer-maintained)
+│   ├── knowledge/
+│   │   ├── company_knowledge.md       # Company KB: services, policies, pricing, FAQs (edit this to update KB)
+│   │   └── embeddings_cache.pkl       # Auto-generated chunk embeddings (invalidated on .md content change)
 │   └── models/
 │       └── all-MiniLM-L6-v2/          # Local sentence transformer model (cached after first download)
 │
@@ -125,7 +129,7 @@ POST /api/v1/chat/stream
 | `intent_classifier` | `nodes/intent_classifier.py` | Encodes query with `all-MiniLM-L6-v2`, runs cosine similarity against intent embeddings. Returns top-1 `intent` (full dict) and top-5 `candidate_intents` (slim dicts for orchestrator). |
 | `orchestrator` | `nodes/orchestrator.py` | LLM router using Claude Haiku. Reads `active_intent` (persisted from last turn), `candidate_intents`, and last 6 messages. Outputs `orchestrator_intent_code` (real code, NONE, or GET_KNOWLEDGEBASE) and updates `active_intent`. |
 | `end_with_reply` | `graph.py` | Thin pass-through: copies `orchestrator_reply` → `reply` so NONE responses reach the frontend uniformly. |
-| `get_knowledgebase_node` | `nodes/get_knowledgebase.py` | Stub: returns a placeholder reply for KB/policy questions. |
+| `get_knowledgebase_node` | `nodes/get_knowledgebase.py` | RAG node: cosine-similarity retrieval over `company_knowledge.md` chunks, then Claude Haiku generates a grounded answer from top-3 chunks. |
 | `date_extractor` | `nodes/date_extractor.py` | Rule-based extraction of single periods and comparison ranges (no LLM). Returns `{ primary, secondary, is_comparison }`. READ path only. |
 | `sql_generator` | `nodes/sql_generator.py` | Builds `MockSQLDatabase` from `view_metadata.py`, runs `create_sql_query_chain` with Claude, validates output, executes SQL via `db_query_executor`, returns SQL and results. READ path only. |
 | `payload_filler_node` | `nodes/LLM_payload_filler.py` | 3-phase WRITE flow: (0) LLM collects missing fields, (1) shows summary + asks yes/no, (2) on yes fires `write_notification` and clears session. WRITE path only. |
@@ -169,6 +173,19 @@ Required columns: `Intent_Code`, `Intent_Name`, `Intent_Category`, `Action_Type 
 - `WRITE` intents: always embedded, regardless of `View` (they are routed to `payload_filler_node`, not SQL generation)
 
 **Embedding text:** `Intent_Name + Intent_Category + Description + Typical_User_Query` — including the example query improves match quality for conversational phrasing.
+
+### `data/knowledge/company_knowledge.md`
+The knowledge base source file — edit this to add or update company information. Organised in `##` sections (Company Overview, Core Services, Pricing, etc.) with `###` subsections. The RAG node chunks on `##` boundaries, keeping `###` content inside their parent chunk. Cache (`embeddings_cache.pkl`) auto-invalidates on file content change (MD5 hash comparison).
+
+**To update the KB while the server is running:**
+```bash
+# 1. Edit company_knowledge.md
+# 2. Call the reload endpoint:
+curl -X POST http://localhost:8000/admin/reload-kb
+# Returns: {"status": "reloaded"}
+```
+
+The reload re-parses the markdown, rebuilds embeddings with `all-MiniLM-L6-v2`, saves the new cache, and hot-swaps the in-memory chunks and embeddings — no server restart needed.
 
 ### `data/view_metadata.py`
 Maps each database view to its column list and the date column used for filtering. The SQL generator uses only this — no live database introspection.
