@@ -1,0 +1,43 @@
+import re
+import pickle
+import logging
+import hashlib
+from pathlib import Path
+
+
+import logging
+from anthropic import Anthropic
+from tavily import TavilyClient
+import os
+from dotenv import load_dotenv
+# Load environment variables
+load_dotenv()
+_client = Anthropic()
+
+# Initialize the Tavily client
+tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+
+SYSTEM_PROMPT = """You are a helpful assistant that takes the user's query and relevant web search results 
+    and provide a clear and concise answer to the user's query"""
+
+# make simple search query to tavily
+search_query = "What is the current fed rate?"
+try:
+    search_results = tavily_client.search(query=search_query, num_results=5)
+    tavily_result = search_results['results'][0]['content']
+    print("Tavily Result:", tavily_result)
+except Exception as e:
+    print(f"Error during web search: {e}")
+
+#future steps : add anthropic for clearly explaining the search results in case the results from tavily are not clear enough for the user.
+claude_response = _client.messages.create(
+    model      = "claude-haiku-4-5-20251001",
+    max_tokens = 512,
+    system = SYSTEM_PROMPT,
+    messages = [
+        {"role": "user", "content": f"User query: {search_query}\n\nWeb search results: {tavily_result}\n\nPlease provide a clear and concise answer to the user's query based on the web search results."}
+    ]
+)
+#call the API and get the relevant answer to the user's query based on the web search results
+answer = claude_response.content[0].text.strip()
+print("Claude Answer:", answer)

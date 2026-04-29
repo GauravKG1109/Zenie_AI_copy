@@ -4,9 +4,11 @@ A FastAPI-based financial chatbot that takes a natural language query, classifie
 - **READ intents** → date extraction → SQL generation → DB execution
 - **WRITE intents** → multi-turn payload filler → confirmation gate → dummy API call
 - **NONE** → direct LLM reply (greetings, out-of-scope, clarification)
-- **GET_KNOWLEDGEBASE** → stub node (coming soon)
+- **GET_KNOWLEDGEBASE** → RAG node over company knowledge base
+- **WEB_SEARCH** → Tavily live search + Claude summary for real-time queries (rates, news, prices)
 
 ---
+tably, surfAPI, duckduckGO - for current affair question
 
 ## How to Run
 
@@ -33,6 +35,7 @@ App available at: `http://localhost:8000`
 ```
 ANTHROPIC_API_KEY=your_key_here
 DATABASE_URL=postgresql://user:password@host:port/dbname
+TAVILY_API_KEY=your_tavily_key_here
 ```
 
 ---
@@ -71,7 +74,8 @@ Zenie_AI/
 │           ├── date_extractor.py      # Calls date_extractor_lib, serializes result to state
 │           ├── sql_generator.py       # MockSQLDatabase + create_sql_query_chain (Claude) + DB execution
 │           ├── LLM_payload_filler.py  # Multi-turn field collector + 3-phase confirmation for WRITE intents
-│           └── get_knowledgebase.py   # RAG node: retrieves KB chunks, answers with Claude Haiku (grounded)
+│           ├── get_knowledgebase.py   # RAG node: retrieves KB chunks, answers with Claude Haiku (grounded)
+│           └── web_search.py          # Web search node: Tavily search + Claude Haiku summary for live queries
 │
 ├── core/
 │   ├── config.py                      # Logging config + DUMMY_FIELDS / DUMMY_APIS for CREATE_INVOICE
@@ -114,10 +118,11 @@ POST /api/v1/chat/stream
  │  [orchestrator]        LLM router: reads active_intent + candidates        │
  │     │                  decides: continue flow / switch / NONE / KB         │
  │     │                                                                      │
- │     ├─── NONE ──────► [end_with_reply] ──────────────────────────► END    │
- │     ├─── GET_KB ─────► [get_knowledgebase_node] ────────────────── ► END  │
- │     ├─── READ code ──► [date_extractor] ──► [sql_generator] ──────► END   │
- │     └─── WRITE code ─► [payload_filler_node] ──────────────────────► END  │
+ │     ├─── NONE ──────────► [end_with_reply] ───────────────────────► END   │
+ │     ├─── GET_KB ─────────► [get_knowledgebase_node] ──────────────► END   │
+ │     ├─── WEB_SEARCH ─────► [web_search_node] ─────────────────────► END   │
+ │     ├─── READ code ──────► [date_extractor] ──► [sql_generator] ──► END   │
+ │     └─── WRITE code ─────► [payload_filler_node] ─────────────────► END   │
  │                                                                            │
  └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -130,6 +135,7 @@ POST /api/v1/chat/stream
 | `orchestrator` | `nodes/orchestrator.py` | LLM router using Claude Haiku. Reads `active_intent` (persisted from last turn), `candidate_intents`, and last 6 messages. Outputs `orchestrator_intent_code` (real code, NONE, or GET_KNOWLEDGEBASE) and updates `active_intent`. |
 | `end_with_reply` | `graph.py` | Thin pass-through: copies `orchestrator_reply` → `reply` so NONE responses reach the frontend uniformly. |
 | `get_knowledgebase_node` | `nodes/get_knowledgebase.py` | RAG node: cosine-similarity retrieval over `company_knowledge.md` chunks, then Claude Haiku generates a grounded answer from top-3 chunks. |
+| `web_search_node` | `nodes/web_search.py` | Live web search via Tavily (top-5 results), then Claude Haiku synthesises a concise answer. Triggered for real-time queries: interest rates, market prices, news. |
 | `date_extractor` | `nodes/date_extractor.py` | Rule-based extraction of single periods and comparison ranges (no LLM). Returns `{ primary, secondary, is_comparison }`. READ path only. |
 | `sql_generator` | `nodes/sql_generator.py` | Builds `MockSQLDatabase` from `view_metadata.py`, runs `create_sql_query_chain` with Claude, validates output, executes SQL via `db_query_executor`, returns SQL and results. READ path only. |
 | `payload_filler_node` | `nodes/LLM_payload_filler.py` | 3-phase WRITE flow: (0) LLM collects missing fields, (1) shows summary + asks yes/no, (2) on yes fires `write_notification` and clears session. WRITE path only. |
@@ -414,5 +420,6 @@ Same payload and response shape as the POST endpoint.
 | `pandas` + `openpyxl` | Reading and cleaning `Intent_file.xlsx` |
 | `dateparser` + `python-dateutil` | Date parsing fallback in `date_extractor_lib.py` |
 | `sqlalchemy` + `psycopg2-binary` | PostgreSQL connection pool and query execution |
+| `tavily-python` | Tavily live web search client (used by `web_search_node`) |
 | `anthropic` | Anthropic Claude API client |
 | `python-dotenv` | Loads `.env` |

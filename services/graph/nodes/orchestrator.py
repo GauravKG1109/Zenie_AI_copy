@@ -9,6 +9,7 @@ client = Anthropic()
 # Reserved intent codes that don't exist in the intent table
 INTENT_KB_NODE     = "GET_KNOWLEDGEBASE"
 INTENT_NONE        = "NONE"
+INTENT_WEB_SEARCH  = "WEB_SEARCH"
 
 ORCHESTRATOR_SYSTEM_PROMPT = """
 You are the routing orchestrator for Zenie AI, a financial assistant for Global FPO (a finance and accounting company).
@@ -47,12 +48,24 @@ YOUR ONLY JOB: decide which intent_code to route to.
    - "how does the approval process work?"
    - "what are the payment terms?"
 
-4. NO ROUTING → return "NONE"
+4. WEB SEARCH → return "WEB_SEARCH"
+   When: user asks for real-time, current, or live information that an LLM cannot answer
+         from training data alone — market prices, news, live rates, today's events
+   Examples:
+   - "what is the current Fed interest rate?"
+   - "did the stock market go up today?"
+   - "latest USD to INR exchange rate"
+   - "today's gold price"
+   - "recent news about RBI policy"
+   Do NOT use for historical/static finance questions answerable from the database.
+
+5. NO ROUTING → return "NONE"
    When: message needs no financial processing
    Examples:
    - Greetings: "hi", "hello", "good morning"
    - Closings: "thank you", "bye", "ok great"
    - Completely out of scope: cooking, coding, sports
+   - Simple finance questions of low complexity that don't require database access, e.g. "what is an invoice?"
    Provide a short, friendly response in the message field.
    For out-of-scope topics: politely decline and redirect to finance topics.
 
@@ -212,7 +225,7 @@ def _validate_intent_code(
     Allowed values: active intent code, any candidate code,
     GET_KNOWLEDGEBASE, NONE.
     """
-    allowed = {INTENT_KB_NODE, INTENT_NONE}
+    allowed = {INTENT_KB_NODE, INTENT_NONE, INTENT_WEB_SEARCH}
 
     if active_intent and active_intent.get("intent_code"):
         allowed.add(active_intent["intent_code"])
@@ -268,8 +281,8 @@ def orchestrator_node(state: GraphState) -> dict:
         f"[Orchestrator] reason={reason}",
     ]
 
-    # ── NONE / GET_KNOWLEDGEBASE — no intent update ───────────────────────────
-    if intent_code in (INTENT_NONE, INTENT_KB_NODE):
+    # ── NONE / GET_KNOWLEDGEBASE / WEB_SEARCH — no intent update ─────────────
+    if intent_code in (INTENT_NONE, INTENT_KB_NODE, INTENT_WEB_SEARCH):
         return {
             "orchestrator_intent_code": intent_code,
             "orchestrator_reply":       reply_msg,

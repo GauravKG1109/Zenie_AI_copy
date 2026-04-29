@@ -2,12 +2,13 @@ import logging
 from langgraph.graph import StateGraph, START, END
 
 from services.graph.state import GraphState
-from services.graph.nodes.orchestrator import orchestrator_node, INTENT_NONE, INTENT_KB_NODE
+from services.graph.nodes.orchestrator import orchestrator_node, INTENT_NONE, INTENT_KB_NODE, INTENT_WEB_SEARCH
 from services.graph.nodes.intent_classifier import intent_classifier_node
 from services.graph.nodes.date_extractor import date_extractor_node
 from services.graph.nodes.sql_generator import sql_generator_node
 from services.graph.nodes.LLM_payload_filler import payload_filler_node
 from services.graph.nodes.get_knowledgebase import get_knowledgebase_node
+from services.graph.nodes.web_search import web_search_node
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,10 @@ def _route_from_orchestrator(state: GraphState) -> str:
         logger.info("[Graph] Orchestrator → GET_KNOWLEDGEBASE")
         return "get_knowledgebase_node"
 
+    if code == INTENT_WEB_SEARCH:
+        logger.info("[Graph] Orchestrator → WEB_SEARCH")
+        return "web_search_node"
+
     # Real intent code (or "intent_classifier" hallucination fallback).
     # Orchestrator has already updated state["intent"] to the chosen candidate,
     # so action_type here is authoritative.
@@ -64,6 +69,7 @@ def build_graph():
     g.add_node("orchestrator",          orchestrator_node)
     g.add_node("end_with_reply",        _end_with_reply)
     g.add_node("get_knowledgebase_node", get_knowledgebase_node)
+    g.add_node("web_search_node",        web_search_node)
     g.add_node("date_extractor",        date_extractor_node)
     g.add_node("sql_generator",         sql_generator_node)
     g.add_node("payload_filler_node",   payload_filler_node)
@@ -79,6 +85,7 @@ def build_graph():
         {
             "end_with_reply":         "end_with_reply",
             "get_knowledgebase_node": "get_knowledgebase_node",
+            "web_search_node":        "web_search_node",
             "date_extractor":         "date_extractor",
             "payload_filler_node":    "payload_filler_node",
         },
@@ -89,6 +96,9 @@ def build_graph():
 
     # KB stub path
     g.add_edge("get_knowledgebase_node", END)
+
+    # Web search path
+    g.add_edge("web_search_node", END)
 
     # READ path
     g.add_edge("date_extractor",  "sql_generator")
